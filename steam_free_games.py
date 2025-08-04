@@ -1,4 +1,4 @@
-import os, json, requests
+import os, json, subprocess, requests
 from flask import Flask, request
 
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -32,6 +32,17 @@ def set_lang(chat, lang):
     langs = load_json(LANG_FILE, {})
     langs[str(chat)] = lang
     save_json(LANG_FILE, langs)
+    git_commit([LANG_FILE], f"Update language for {chat} to {lang}")
+
+def git_commit(files, message):
+    try:
+        subprocess.run(["git", "config", "--global", "user.email", "github-actions@users.noreply.github.com"])
+        subprocess.run(["git", "config", "--global", "user.name", "github-actions"])
+        subprocess.run(["git", "add"] + files, check=True)
+        subprocess.run(["git", "commit", "-m", message], check=True)
+        subprocess.run(["git", "push"], check=True)
+    except Exception as e:
+        print("Git commit error:", e)
 
 def notify_free_games():
     last_notified = load_json(STATE_FILE, [])
@@ -60,6 +71,7 @@ def notify_free_games():
 
         last_notified.extend(g["id"] for g in new_games)
         save_json(STATE_FILE, last_notified)
+        git_commit([STATE_FILE], "Update last_notified.json")
     else:
         print("No new free games.")
 
