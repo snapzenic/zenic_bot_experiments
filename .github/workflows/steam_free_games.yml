@@ -10,6 +10,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -19,9 +21,9 @@ jobs:
       - name: Install dependencies
         run: pip install requests flask
 
-      - name: Check free games
+      - name: Run notifier
         run: python3 steam_free_games.py
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
-          GITHUB_ACTIONS: Notify
+          GITHUB_ACTIONS: true
