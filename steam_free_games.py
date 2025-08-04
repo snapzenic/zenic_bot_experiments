@@ -1,5 +1,6 @@
 import os, json, subprocess, requests
 from datetime import datetime
+from flask import Flask, request
 
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TG_CHAT = os.getenv("TELEGRAM_CHAT")
@@ -23,10 +24,14 @@ messages = {
 }
 
 def load_json(file, default):
-    return json.load(open(file)) if os.path.exists(file) else default
+    if not os.path.exists(file):
+        save_json(file, default)
+        git_commit([file], f"Create {file}")
+        return default
+    return json.load(open(file))
 
 def save_json(file, data):
-    json.dump(data, open(file), ensure_ascii=False)
+    json.dump(data, open(file, "w"), ensure_ascii=False)
 
 def escape_md(text):
     for ch in "_*[]()~`>#+-=|{}.!" :
@@ -50,9 +55,11 @@ def git_commit(files, message):
         subprocess.run(["git", "add"] + files, check=True)
         status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
         if status.stdout.strip() == "":
+            print("No changes to commit.")
             return
         subprocess.run(["git", "commit", "-m", message], check=True)
-        subprocess.run(["git", "push", "origin", "HEAD"], check=True)
+        subprocess.run(["git", "push", "-u", "origin", "HEAD"], check=True)
+        print("Commit & push successful.")
     except subprocess.CalledProcessError as e:
         print("Git commit error:", e)
 
@@ -90,7 +97,6 @@ def notify_free_games():
 if os.getenv("GITHUB_ACTIONS"):
     notify_free_games()
 
-from flask import Flask, request
 app = Flask(__name__)
 
 @app.route(f"/{TG_TOKEN}", methods=["POST"])
