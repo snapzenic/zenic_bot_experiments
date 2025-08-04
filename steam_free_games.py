@@ -1,5 +1,5 @@
 import os, json, subprocess, requests
-from flask import Flask, request
+from datetime import datetime
 
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TG_CHAT = os.getenv("TELEGRAM_CHAT")
@@ -8,16 +8,25 @@ STATE_FILE = "last_notified.json"
 LANG_FILE = "lang_settings.json"
 
 messages = {
-    "tr": "🎮 *Steam'de yeni ücretsiz oyun(lar) bulundu\\!*",
-    "az": "🎮 *Steam-də yeni pulsuz oyun(lar) tapıldı\\!*",
-    "en": "🎮 *New free game\\(s\\) on Steam\\!*"
+    "tr": {
+        "found": "🎮 *Steam'de yeni ücretsiz oyun(lar) bulundu\\!*",
+        "none": "⏰ *{time} tarihinde ücretsiz oyun bulunamadı\\.*"
+    },
+    "az": {
+        "found": "🎮 *Steam-də yeni pulsuz oyun(lar) tapıldı\\!*",
+        "none": "⏰ *{time} tarixində pulsuz oyun tapılmadı\\.*"
+    },
+    "en": {
+        "found": "🎮 *New free game\\(s\\) on Steam\\!*",
+        "none": "⏰ *No free games found at {time}\\.*"
+    }
 }
 
 def load_json(file, default):
     return json.load(open(file)) if os.path.exists(file) else default
 
 def save_json(file, data):
-    json.dump(data, open(file, "w"))
+    json.dump(data, open(file), ensure_ascii=False)
 
 def escape_md(text):
     for ch in "_*[]()~`>#+-=|{}.!" :
@@ -36,12 +45,15 @@ def set_lang(chat, lang):
 
 def git_commit(files, message):
     try:
-        subprocess.run(["git", "config", "--global", "user.email", "github-actions@users.noreply.github.com"])
-        subprocess.run(["git", "config", "--global", "user.name", "github-actions"])
+        subprocess.run(["git", "config", "user.email", "github-actions@users.noreply.github.com"], check=True)
+        subprocess.run(["git", "config", "user.name", "github-actions"], check=True)
         subprocess.run(["git", "add"] + files, check=True)
+        status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
+        if status.stdout.strip() == "":
+            return
         subprocess.run(["git", "commit", "-m", message], check=True)
-        subprocess.run(["git", "push"], check=True)
-    except Exception as e:
+        subprocess.run(["git", "push", "origin", "HEAD"], check=True)
+    except subprocess.CalledProcessError as e:
         print("Git commit error:", e)
 
 def notify_free_games():
@@ -49,35 +61,36 @@ def notify_free_games():
     data = requests.get(API_URL).json()
     free_games = [g for g in data["specials"]["items"] if g.get("discount_percent") == 100]
     new_games = [g for g in free_games if g["id"] not in last_notified]
+    lang = get_lang(TG_CHAT)
 
     if new_games:
-        lang = get_lang(TG_CHAT)
-        message_lines = [messages.get(lang, messages["tr"])]
+        message_lines = [messages[lang]["found"]]
         for game in new_games:
             name = escape_md(game["name"])
             url = f"https://store.steampowered.com/app/{game['id']}/"
             message_lines.append(f"• [{name}]({url})")
         message = "\n".join(message_lines)
-
-        requests.get(
-            f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-            params={
-                "chat_id": TG_CHAT,
-                "text": message,
-                "parse_mode": "MarkdownV2",
-                "disable_web_page_preview": True
-            }
-        )
-
         last_notified.extend(g["id"] for g in new_games)
         save_json(STATE_FILE, last_notified)
         git_commit([STATE_FILE], "Update last_notified.json")
     else:
-        print("No new free games.")
+        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+        message = messages[lang]["none"].format(time=escape_md(now))
+
+    requests.get(
+        f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+        params={
+            "chat_id": TG_CHAT,
+            "text": message,
+            "parse_mode": "MarkdownV2",
+            "disable_web_page_preview": True
+        }
+    )
 
 if os.getenv("GITHUB_ACTIONS"):
     notify_free_games()
 
+from flask import Flask, request
 app = Flask(__name__)
 
 @app.route(f"/{TG_TOKEN}", methods=["POST"])
@@ -88,7 +101,7 @@ def webhook():
 
     if text.startswith("/lang "):
         new_lang = text.split(" ", 1)[1].strip().lower()
-        if new_lang in ["tr", "az", "en"]:
+        if new_lang in messages.keys():
             set_lang(chat, new_lang)
             reply = f"Dil değiştirildi: {new_lang.upper()}"
         else:
